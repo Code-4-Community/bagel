@@ -1,16 +1,15 @@
 {
-  "name": "bagelbot",
+  "name": "bagel",
   "version": "1.0.0",
-  "main": "app.js",
+  "description": "",
+  "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
   "license": "ISC",
-  "description": "",
   "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.731.0",
-    "@slack/bolt": "^4.2.0",
+    "@slack/web-api": "^6.7.2",
     "dotenv": "^16.4.7"
   }
 }
