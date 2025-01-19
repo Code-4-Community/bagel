@@ -1,6 +1,7 @@
 const { App } = require('@slack/bolt');
 const dotenv = require('dotenv');
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+const { DynamoDBDocumentClient, UpdateCommand, GetCommand } = require('@aws-sdk/lib-dynamodb')
 
 dotenv.config();
 
@@ -12,6 +13,9 @@ dotenv.config();
  * gets parsed into:
  *  ["arg one", "arg2", "arg3", "arg 4"]
  * 
+ * Note: right now, this isn't mandatory to do, but I'm doing this to keep the command syntax consistent
+ * in case we want to add commands that take multiple args that can each be multiple words
+ * 
  * @param {*} rawArgs 
  * @returns
  */
@@ -19,7 +23,6 @@ function parseCommandArgs(rawArgs) {
   const regex = /"([^"]+)"|\S+/g;
 
   const matches = [...rawArgs.matchAll(regex)].map(match => {
-    console.info(match);
     return match[1] || match[0];
   })
 
@@ -31,23 +34,262 @@ const app = new App({
   signingSecret: process.env.SLACK_SIGNING_SECRET
 });
 
+const client = new DynamoDBClient({});
+const docClient = DynamoDBDocumentClient.from(client);
+
+// App constants
+const MAX_DISPLAYED_BIO_FIELDS = 3;
+const BAGEL_USERS_TABLE = "BagelUsers";
+const USER_FACT_COLUMN = "facts";
+
 app.command('/test', async ({ command, ack, respond }) => {
   await ack();
-
-  console.log(command)
-  console.log(parseCommandArgs(command.text))
 
   await respond('working as intended :)');
 });
 
-app.command('/help', async ({ command, ack, respond }) => {
+/**
+ * Adds a fact to a user's bio by appending the fact to the list field `facts` in the `BagelUsers` table.
+ * 
+ * @param {*} userId the user ID calling (and who to add the fact to)
+ * @param {*} fact the fact to add
+ * @returns a promise for the DynamoDB add operation
+ */
+function addUserFact(userId, fact) {
+  const command = new UpdateCommand({
+    TableName: BAGEL_USERS_TABLE,
+    Key: {
+      user_id: userId,
+    },
+    UpdateExpression: "set #facts = list_append(if_not_exists(#facts, :empty_list), :f)",
+    ExpressionAttributeNames: {
+      "#facts": USER_FACT_COLUMN,
+    },
+    ExpressionAttributeValues: {
+      ":empty_list": [],
+      ":f": [fact],
+    },
+  });
 
+  return docClient.send(command);
+}
+
+/**
+ * Removes the fact from a user's bio at the given index
+ * @param {*} userId the user ID calling (and from who to remove the fact from)
+ * @param {*} index which fact should be removed
+ * @returns a promise for the DynamoDB remove operation
+ */
+function removeUserFact(userId, index) {
+  const command = new UpdateCommand({
+    TableName: BAGEL_USERS_TABLE,
+    Key: {
+      user_id: userId,
+    },
+    UpdateExpression: `REMOVE #facts[${index}]`,
+    ExpressionAttributeNames: {
+      "#facts": USER_FACT_COLUMN,
+    },
+    ReturnValues: 'ALL_OLD', // return previous state so we can get the fact we removed
+  });
+
+  return docClient.send(command);
+}
+
+/**
+ * Gets all current facts stored for a user
+ * @param {*} userId the user whose facts to retrieve
+ * @returns a promise for the DynamoDB get operation (which resolves to an object w/ the user's facts)
+ */
+function getUserFacts(userId) {
+  const command = new GetCommand({
+    TableName: BAGEL_USERS_TABLE,
+    Key: {
+      user_id: userId,
+    },
+    ProjectionExpression: USER_FACT_COLUMN
+  });
+
+  return docClient.send(command);
+}
+
+// TODO: refactor this mess please
+app.command('/bio', async ({ command, ack, respond, say }) => {
+  await ack();
+
+  const args = parseCommandArgs(command.text);
+  const operation = args[0];
+  
+  let errorMessage = null;
+  let successMessage = null;
+
+  switch (operation) {
+    case "add":
+      const fact = args[1];
+      
+      if (fact === undefined) {
+        errorMessage = "You need to specify a fact about yourself to add!";
+        break;
+      }
+
+      await addUserFact(command.user_id, fact);
+      successMessage = `Successfully added to your bio: ${fact}`;
+      
+      break;
+    case "remove":
+      const indexToRemove = parseInt(args[1]);
+
+      if (indexToRemove === NaN) {
+        errorMessage = "You need to specify which number fact to remove!";
+        break;
+      }
+
+      const response = await removeUserFact(command.user_id, indexToRemove);
+      if (response.Attributes === undefined) {
+        errorMessage = `You don't currently have a profile stored! Try /bio add to add some facts about yourself.`;
+        break;
+      }
+
+      const removedFact = response.Attributes[USER_FACT_COLUMN][indexToRemove];
+
+      if (removedFact !== undefined) {
+        successMessage = `Succesfully removed from bio: ${removedFact}`;
+      } else {
+        errorMessage = `Unable to delete fact ${indexToRemove} - are you sure it exists? (try /bio show to view your current facts)`;
+      }
+      
+      break;
+    case "show":
+      const userFacts = await getUserFacts(command.user_id);
+      
+      if (userFacts.Item === undefined || userFacts.Item[USER_FACT_COLUMN].length === 0) {
+        errorMessage = `You don't currently have a profile stored! Try /bio add to add some facts about yourself.`;
+        break;
+      }
+
+      const responseBlocks = [
+        {
+          type: "section",
+          text: {
+            type: "plain_text",
+            text: "Here are the current facts on your bio:"
+          }
+        },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: userFacts.Item[USER_FACT_COLUMN].map((fact, index) => `${index}: ${fact}`).join('\n'),
+          }
+        }
+      ];
+
+      if (userFacts.Item[USER_FACT_COLUMN].length > MAX_DISPLAYED_BIO_FIELDS) {
+        responseBlocks.push({
+          type: "section",
+          text: {
+            type: "plain_text",
+            text: `Note: only ${MAX_DISPLAYED_BIO_FIELDS} facts, chosen at random, will be displayed to your chat partner.`
+          }
+        })
+      }
+
+      await say({
+        text: "something went wrong - sorry!", // what am i even supposed to put here? error fallback text?
+        blocks: responseBlocks
+      });
+
+      break;
+    default:
+      errorMessage = "Unknown command! Try /help to see what you can do.";
+      break;
+  }
+
+  if (errorMessage !== null) {
+    await respond(errorMessage);
+  } else if (successMessage !== null) {
+    await respond(successMessage);
+  }
 });
 
-app.command('/bio', async ({ command, ack, respond }) => {
 
+const commandInfo = {
+  bio: {
+    description: "update your bio for \#c4conversation random matches"
+  },
+  help: {
+    description: "learn how to use Bagel commands",
+    usage: "> help [command]: get help on how to use the specified command"
+  },
+  test: {
+    description: "test that the bot is up and running",
+    usage: "> Sends a dummy message back as confirmation that the bot is active"
+  },
+}
+
+app.command('/help', async ({ command, ack, respond, say }) => {
+  await ack();
+
+  const args = parseCommandArgs(command.text);
+  const requestedCommand = args[0];
+
+  let blocks;
+  switch (requestedCommand) {
+    case "bio":
+    case "help":
+    case "test":
+      blocks = [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `${requestedCommand}: ${commandInfo[requestedCommand].description}`
+          }
+        },
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `Usage:\n${commandInfo[requestedCommand].usage}`
+          }
+        }
+      ]
+      break;
+
+    default: 
+      const helpText = Object.entries(commandInfo).map(([ c, info ]) => `- ${c}: ${info.description}`).join('\n');
+      blocks = [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `Available commands:\n${helpText}`
+          }
+        },
+      ]
+
+      if (requestedCommand !== undefined) {
+        // command was specified but unrecognized: let the user know with an error message in front of command info
+        blocks.splice(0, 0, {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: `Command "${requestedCommand}" is not recognized!`
+          }
+        })
+      }
+      break;
+  }
+
+  blocks.push({
+    type: "divider"
+  })
+
+  await say({
+    text: "something went wrong - sorry!", // what am i even supposed to put here? error fallback text?
+    blocks
+  });
 });
-
 
 
 (async () => {
