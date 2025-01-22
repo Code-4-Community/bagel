@@ -29,25 +29,6 @@ function parseCommandArgs(rawArgs) {
   return matches;
 }
 
-const app = new App({
-  token: process.env.SLACK_BOT_TOKEN,
-  signingSecret: process.env.SLACK_SIGNING_SECRET
-});
-
-const client = new DynamoDBClient({});
-const docClient = DynamoDBDocumentClient.from(client);
-
-// App constants
-const MAX_DISPLAYED_BIO_FIELDS = 3;
-const BAGEL_USERS_TABLE = "BagelUsers";
-const USER_FACT_COLUMN = "facts";
-
-app.command('/test', async ({ command, ack, respond }) => {
-  await ack();
-
-  await respond('working as intended :)');
-});
-
 /**
  * Adds a fact to a user's bio by appending the fact to the list field `facts` in the `BagelUsers` table.
  * 
@@ -112,6 +93,36 @@ function getUserFacts(userId) {
 
   return docClient.send(command);
 }
+
+function extractBlockText(blocks) {
+  const blockText = [];
+  for (let block of blocks) {
+    if (block.type === 'section') {
+      blockText.push(block.text.text);
+    }
+  }
+
+  return blockText.join(' ');
+}
+
+const app = new App({
+  token: process.env.SLACK_BOT_TOKEN,
+  signingSecret: process.env.SLACK_SIGNING_SECRET
+});
+
+const client = new DynamoDBClient({});
+const docClient = DynamoDBDocumentClient.from(client);
+
+// App constants
+const MAX_DISPLAYED_BIO_FIELDS = 3;
+const BAGEL_USERS_TABLE = "BagelUsers";
+const USER_FACT_COLUMN = "facts";
+
+app.command('/test', async ({ command, ack, respond }) => {
+  await ack();
+
+  await respond('working as intended :)');
+});
 
 // TODO: refactor this mess please
 app.command('/bio', async ({ command, ack, respond, say }) => {
@@ -195,7 +206,7 @@ app.command('/bio', async ({ command, ack, respond, say }) => {
       }
 
       await say({
-        text: "something went wrong - sorry!", // what am i even supposed to put here? error fallback text?
+        text: extractBlockText(blocks), // TODO: figure out a better way of putting message text here
         blocks: responseBlocks
       });
 
@@ -212,10 +223,10 @@ app.command('/bio', async ({ command, ack, respond, say }) => {
   }
 });
 
-
 const commandInfo = {
   bio: {
-    description: "update your bio for \#c4conversation random matches"
+    description: "update your bio for \#c4conversation random matches",
+    usage: `> - bio show: shows all facts listed on your profile\n> - bio add ["fact"]: adds the fact to your profile. Must be enclosed in double quotes ("")\n> - bio remove [index]: removes the fact at the given index from your profile`
   },
   help: {
     description: "learn how to use Bagel commands",
@@ -286,14 +297,13 @@ app.command('/help', async ({ command, ack, respond, say }) => {
   })
 
   await say({
-    text: "something went wrong - sorry!", // what am i even supposed to put here? error fallback text?
+    text: extractBlockText(blocks), // TODO: figure out a better way of putting message text here
     blocks
   });
 });
 
 
 (async () => {
-  // Start your app
   await app.start(process.env.PORT || 3000);
 
   app.logger.info('⚡️ Bolt app is running!');
