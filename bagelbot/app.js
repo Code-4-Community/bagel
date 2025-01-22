@@ -1,4 +1,4 @@
-const { App } = require('@slack/bolt');
+const { App, AwsLambdaReceiver } = require('@slack/bolt');
 const dotenv = require('dotenv');
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
 const { DynamoDBDocumentClient, UpdateCommand, GetCommand } = require('@aws-sdk/lib-dynamodb')
@@ -105,9 +105,14 @@ function extractBlockText(blocks) {
   return blockText.join(' ');
 }
 
+const awsReceiver = new AwsLambdaReceiver({
+  signingSecret: process.env.SLACK_SIGNING_SECRET,
+});
+
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
-  signingSecret: process.env.SLACK_SIGNING_SECRET
+  // signingSecret: process.env.SLACK_SIGNING_SECRET
+  receiver: awsReceiver,
 });
 
 const client = new DynamoDBClient({});
@@ -303,8 +308,13 @@ app.command('/help', async ({ command, ack, respond, say }) => {
 });
 
 
-(async () => {
-  await app.start(process.env.PORT || 3000);
+// (async () => {
+//   await app.start(process.env.PORT || 3000);
 
-  app.logger.info('⚡️ Bolt app is running!');
-})();
+//   app.logger.info('⚡️ Bolt app is running!');
+// })();
+
+module.exports.handler = async (event, context, callback) => {
+  const handler = await awsReceiver.start();
+  return handler(event, context, callback);
+}
