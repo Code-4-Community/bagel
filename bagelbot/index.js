@@ -211,7 +211,7 @@ app.command('/bio', async ({ command, ack, respond, say }) => {
       }
 
       await say({
-        text: extractBlockText(blocks), // TODO: figure out a better way of putting message text here
+        text: extractBlockText(responseBlocks), // TODO: figure out a better way of putting message text here
         blocks: responseBlocks
       });
 
@@ -279,7 +279,7 @@ app.command('/help', async ({ command, ack, respond, say }) => {
           type: "section",
           text: {
             type: "mrkdwn",
-            text: `Available commands:\n${helpText}`
+            text: `help [command]: get help on how to use the specified command\n\nAvailable commands:\n${helpText}`
           }
         },
       ]
