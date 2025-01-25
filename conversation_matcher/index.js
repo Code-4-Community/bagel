@@ -4,12 +4,15 @@ const AWS = require('aws-sdk');
 const dotenv = require('dotenv')
 
 dotenv.config()
+// Need to manually configure the region: https://stackoverflow.com/questions/31039948/configuring-region-in-node-js-aws-sdk
+AWS.config.update({region: process.env.AWS_REGION});
 
 /*
 Lambda scheduled to run every week:
 1. Get all members of #c4conversation 
 2. Group them into pairs (with a triplet if odd)
 3. For each group, start a DM with an intro message
+  3a. Intro message contains some facts added by the user, if present
 4. Ping #c4conversation
 */
 
@@ -18,7 +21,7 @@ const C4C_SLACK_TOKEN = process.env.C4C_SLACK_TOKEN;
 
 const C4CONVERSATION_ID = process.env.C4CONVERSATION; // #c4conversation
 // const C4CONVERSATION_ID = process.env.TEST_BAGEL; // #test-bagel
-const BOT_USER_ID = 'U018K4V1ZKQ';
+const BOT_USER_ID = 'U089723F15G';
 
 const LOCATION_PREF = {
   IN_PERSON: 'IN_PERSON',
@@ -66,15 +69,12 @@ async function startConversations() {
   console.log(`Shuffled members: ${members}`);
 
   // members = [1, 3, 2];
-  members = await Promise.all(
-    members.map(async (memberId) => {
-      return await getUserInfo(memberId);
-    })
-  );
+  members = await getUsersInfo(members);
+  const memberMap = members.reduce((currentMap, memberInfo) => ({ ...currentMap, [memberInfo.id]: memberInfo }), {});
   // members = [
-  //   { id: 1, location_pref: LOCATION_PREF.IN_PERSON, lastThreeMatched: [] },
-  //   { id: 3, location_pref: LOCATION_PREF.VIRTUAL, lastThreeMatched: [] },
-  //   { id: 2, location_pref: LOCATION_PREF.IN_PERSON, lastThreeMatched: [] },
+  //   { id: 1, location_pref: LOCATION_PREF.IN_PERSON, lastThreeMatched: [], facts: ['i enjoy exploring boston'] },
+  //   { id: 3, location_pref: LOCATION_PREF.VIRTUAL, lastThreeMatched: [], facts: [] },
+  //   { id: 2, location_pref: LOCATION_PREF.IN_PERSON, lastThreeMatched: [], facts: [] },
   // ];
   console.log('Members user info');
   console.log(members);  
@@ -88,21 +88,34 @@ async function startConversations() {
     const channelId = response.channel.id;
 
     // TODO uncomment at the end!!
-    await client.chat.postMessage({
-      channel: channelId,
-      text: `Hi ${group
+    // await client.chat.postMessage({
+    //   channel: channelId,
+    //   text: `Hi ${group
+    //     .map((userId) => `<@${userId}>`)
+    //     .join(
+    //       ' and '
+    //     )}, you've been matched for a random sync. Introduce yourself and ask to get coffee sometime!`,
+    // });
+
+    let messageParts = [`Hi ${group
         .map((userId) => `<@${userId}>`)
         .join(
           ' and '
-        )}, you've been matched for a random sync. Introduce yourself and ask to get coffee sometime!`,
-    });
+        )}, you've been matched for a random sync. Introduce yourself and ask to get coffee sometime!`
+      ];
+    
+    for (let member of group) {
+      if (memberMap[member].facts.length > 0) {
+        const memberFacts = memberMap[member].facts.map(fact => `- ${fact}`).join('\n');
+        messageParts.push(`<@${member}> has some interesting facts about themselves to share:\n${memberFacts}`);
+      }
+    }
 
-    const icebreaker = '';
     // TODO uncomment at the end!!
-    // await client.chat.postMessage({
-    //   channel: channelId,
-    //   text: icebreaker,
-    // });
+    await client.chat.postMessage({
+      channel: channelId,
+      text: messageParts.join('\n-------\n'),
+    });
   }
 
   // TODO uncomment at end!!
@@ -129,18 +142,9 @@ function shuffleArray(array) {
     const j = Math.floor(Math.random() * (i + 1));
     [array[i], array[j]] = [array[j], array[i]];
   }
-}
 
-// groupIntoPairs([1, 2, 3, 4, 5]); -> [ [ 1, 2 ], [ 3, 4, 5 ] ]
-// function groupIntoPairs(members) {
-//   if (members.length <= 1) {
-//     throw new Error("Can't group 0 to 1 people");
-//   } else if (members.length <= 3) {
-//     return [members];
-//   } else {
-//     return [members.slice(0, 2), ...groupIntoPairs(members.slice(2))];
-//   }
-// }
+  return array;
+}
 
 const matchEveryone = (people) => {
   if (people.length <= 1) {
@@ -200,33 +204,78 @@ const canBeMatched = (personOne, personTwo) => {
 };
 
 ///// DYNAMO /////
-const getUserInfo = async (userId) => {
-  let userInfo = await dynamo
-    .get({
-      TableName: 'BagelUsers',
-      Key: {
-        user_id: userId,
-      },
-    })
-    .promise();
+// const getUserInfo = async (userId) => {
+//   let userInfo = await dynamo
+//     .get({
+//       TableName: 'BagelUsers',
+//       Key: {
+//         user_id: userId,
+//       },
+//     })
+//     .promise();
 
-  if (!userInfo || !userInfo['Item']) {
-    return {
-      id: userId,
-      location_pref: LOCATION_PREF.NO_PREF,
-      lastThreeMatched: [],
-    };
-  }
+//   if (!userInfo || !userInfo['Item']) {
+//     return {
+//       id: userId,
+//       location_pref: LOCATION_PREF.NO_PREF,
+//       lastThreeMatched: [],
+//     };
+//   }
 
-  userInfo = userInfo['Item'];
-  console.log(userInfo);
+//   userInfo = userInfo['Item'];
+//   console.log(userInfo);
 
-  return {
-    id: userId,
-    location_pref: LOCATION_PREF_MAP[userInfo['location_pref'] || 'no_pref'],
-    lastThreeMatched: (userInfo['last_three_matched'] || []).slice(-3),
-  };
-};
+//   return {
+//     id: userId,
+//     location_pref: LOCATION_PREF_MAP[userInfo['location_pref'] || 'no_pref'],
+//     lastThreeMatched: (userInfo['last_three_matched'] || []).slice(-3),
+//   };
+// };
+
+const getUsersInfo = async (userIds) => {
+  const userKeys = userIds.map(userId => {
+    return { user_id: userId }
+  })
+
+  const result = await dynamo.batchGet({
+    RequestItems: {
+      BagelUsers: {
+        Keys: userKeys,
+        AttributesToGet: [
+          'location_pref',
+          'last_three_matched',
+          'facts',
+          'user_id'
+        ]
+      }
+    }
+  }).promise();
+
+  const memberMap = result.Responses.BagelUsers.reduce((currentMap, userRow) => {
+    return {...currentMap, [userRow.user_id]: userRow}
+  }, {});
+
+  const processedMembers = userIds.map(userId => {
+    const userInfo = memberMap[userId];
+    if (userInfo !== undefined) {
+      return {
+        id: userId,
+        location_pref: LOCATION_PREF_MAP[userInfo['location_pref'] || 'no_pref'],
+        lastThreeMatched: (userInfo['last_three_matched'] || []).slice(-3),
+        facts: shuffleArray(userInfo['facts'] || []).slice(-3),
+      }
+    } else {
+      return {
+        id: userId,
+        location_pref: LOCATION_PREF.NO_PREF,
+        lastThreeMatched: [],
+        facts: []
+      }
+    }
+  })
+
+  return processedMembers;
+}
 
 const updateLastThreeMatched = async (userId, otherUserIds) => {
   console.log('updateLastThreeMatched', userId, otherUserIds);
@@ -463,5 +512,5 @@ const testCanBeMatched = () => {
 };
 
 // testGroupIntoPairs(); // DEPRECATED
-testMatchFirstPerson();
-testCanBeMatched();
+// testMatchFirstPerson();
+// testCanBeMatched();
