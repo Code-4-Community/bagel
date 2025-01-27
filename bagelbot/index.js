@@ -20,7 +20,7 @@ dotenv.config();
  * @returns
  */
 function parseCommandArgs(rawArgs) {
-  const regex = /"([^"]+)"|\S+/g;
+  const regex = /["“”]([^"“”]+)["“”]|\S+/g;
 
   const matches = [...rawArgs.matchAll(regex)].map(match => {
     return match[1] || match[0];
