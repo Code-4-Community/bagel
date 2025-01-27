@@ -5,7 +5,7 @@ const dotenv = require('dotenv')
 
 dotenv.config()
 // Need to manually configure the region: https://stackoverflow.com/questions/31039948/configuring-region-in-node-js-aws-sdk
-AWS.config.update({region: process.env.AWS_REGION});
+AWS.config.update({region: process.env.CONFIG_AWS_REGION});
 
 /*
 Lambda scheduled to run every week:
