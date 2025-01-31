@@ -80,22 +80,14 @@ async function startConversations() {
   console.log(members);  
 
   const groups = matchEveryone(members);
+  const membersMissingFacts = [];
+
   for (const group of groups) {
     console.log(`Group: ${group}`);
     const response = await client.conversations.open({
       users: group.join(','),
     });
     const channelId = response.channel.id;
-
-    // TODO uncomment at the end!!
-    // await client.chat.postMessage({
-    //   channel: channelId,
-    //   text: `Hi ${group
-    //     .map((userId) => `<@${userId}>`)
-    //     .join(
-    //       ' and '
-    //     )}, you've been matched for a random sync. Introduce yourself and ask to get coffee sometime!`,
-    // });
 
     let messageParts = [`Hi ${group
         .map((userId) => `<@${userId}>`)
@@ -108,6 +100,8 @@ async function startConversations() {
       if (memberMap[member].facts.length > 0) {
         const memberFacts = memberMap[member].facts.map(fact => `- ${fact}`).join('\n');
         messageParts.push(`<@${member}> has some interesting facts about themselves to share:\n${memberFacts}`);
+      } else {
+        membersMissingFacts.push(member);
       }
     }
 
@@ -130,6 +124,20 @@ async function startConversations() {
       const otherMembers = group.filter((id) => id !== memberId);
       await updateLastThreeMatched(memberId, otherMembers);
     }
+  }
+
+  // Remind anyone with facts to add some facts about themselves
+  for (const memberNoFact of membersMissingFacts) {
+    const dmResponse = await client.conversations.open({
+      users: memberNoFact
+    });
+    const dmId = dmResponse.channel.id;
+
+    await client.chat.postMessage({
+      channel: dmId,
+      mrkdwn: true,
+      text: `Hey there! Looks like you're in <#${C4CONVERSATION_ID}> but haven't added any facts about yourself to share with your random match. Consider adding some to help break the ice! You can start by messaging me with \`/help\` :)`,
+    });
   }
 
   console.log('Done!');
