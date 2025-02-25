@@ -21,7 +21,7 @@ const C4C_SLACK_TOKEN = process.env.C4C_SLACK_TOKEN;
 
 const C4CONVERSATION_ID = process.env.C4CONVERSATION; // #c4conversation
 // const C4CONVERSATION_ID = process.env.TEST_BAGEL; // #test-bagel
-const BOT_USER_ID = 'U089723F15G';
+const BOT_USER_ID = ['U089723F15G', 'U018K4V1ZKQ'];
 
 const LOCATION_PREF = {
   IN_PERSON: 'IN_PERSON',
@@ -64,7 +64,7 @@ async function startConversations() {
   if (members == null) {
     throw new Error('Response from conversations.members was null');
   }
-  members = members.filter((member) => member != BOT_USER_ID);
+  members = members.filter((member) => !BOT_USER_ID.includes(member));
   shuffleArray(members);
   console.log(`Shuffled members: ${members}`);
 
