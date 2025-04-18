@@ -66,7 +66,7 @@ async function startConversations() {
   }
   members = members.filter((member) => !BOT_USER_ID.includes(member));
   shuffleArray(members);
-  console.log(`Shuffled members: ${members}`);
+  console.log(`Shuffled members: ${members} (${members.length} members)`);
 
   // members = [1, 3, 2];
   members = await getUsersInfo(members);
@@ -97,7 +97,7 @@ async function startConversations() {
       ];
     
     for (let member of group) {
-      if (memberMap[member].facts.length > 0) {
+      if (memberMap[member].facts === undefined || memberMap[member].facts.length > 0) {
         const memberFacts = memberMap[member].facts.map(fact => `- ${fact}`).join('\n');
         messageParts.push(`<@${member}> has some interesting facts about themselves to share:\n${memberFacts}`);
       } else {
@@ -126,6 +126,7 @@ async function startConversations() {
     }
   }
 
+  console.log(`Missing members: ${membersMissingFacts}`)
   // Remind anyone with facts to add some facts about themselves
   for (const memberNoFact of membersMissingFacts) {
     const dmResponse = await client.conversations.open({
